@@ -27,7 +27,7 @@ def parse_args():
         "--checkpoint", help="the dir to checkpoint which the model read from"
     )
     parser.add_argument("--hungarian", action='store_true')
-    parser.add_argument("--root", type=str, default="data/nuScenes")
+    parser.add_argument("--root", type=str, default="/home/milab20/PycharmProjects/Center_point/CenterPoint/data/nuScenes/")
     parser.add_argument("--version", type=str, default='v1.0-trainval')
     parser.add_argument("--max_age", type=int, default=3)
 
@@ -74,6 +74,39 @@ def save_first_frame():
     with open(os.path.join(args.work_dir, 'frames_meta.json'), "w") as f:
         json.dump({'frames': frames}, f)
 
+
+def eval_tracking():
+    args = parse_args()
+    eval(os.path.join(args.work_dir, 'tracking_result.json'),
+         "val",
+         args.work_dir,
+         args.root
+         )
+
+
+def eval(res_path, eval_set="val", output_dir=None, root_path=None):
+    from nuscenes.eval.tracking.evaluate import TrackingEval
+    from nuscenes.eval.common.config import config_factory as track_configs
+
+    cfg = track_configs("tracking_nips_2019")
+    nusc_eval = TrackingEval(
+        config=cfg,
+        result_path=res_path,
+        eval_set=eval_set,
+        output_dir=output_dir,
+        verbose=True,
+        nusc_version="v1.0-trainval",
+        nusc_dataroot=root_path,
+    )
+    metrics_summary = nusc_eval.main()
+
+
+def test_time():
+    speeds = []
+    for i in range(3):
+        speeds.append(main())
+
+    print("Speed is {} FPS".format(max(speeds)))
 
 def main():
     args = parse_args()
@@ -153,38 +186,7 @@ def main():
         json.dump(nusc_annos, f)
     return speed
 
-def eval_tracking():
-    args = parse_args()
-    eval(os.path.join(args.work_dir, 'tracking_result.json'),
-        "val",
-        args.work_dir,
-        args.root
-    )
 
-def eval(res_path, eval_set="val", output_dir=None, root_path=None):
-    from nuscenes.eval.tracking.evaluate import TrackingEval 
-    from nuscenes.eval.common.config import config_factory as track_configs
-
-    
-    cfg = track_configs("tracking_nips_2019")
-    nusc_eval = TrackingEval(
-        config=cfg,
-        result_path=res_path,
-        eval_set=eval_set,
-        output_dir=output_dir,
-        verbose=True,
-        nusc_version="v1.0-trainval",
-        nusc_dataroot=root_path,
-    )
-    metrics_summary = nusc_eval.main()
-
-
-def test_time():
-    speeds = []
-    for i in range(3):
-        speeds.append(main())
-
-    print("Speed is {} FPS".format( max(speeds)  ))
 
 if __name__ == '__main__':
     save_first_frame()

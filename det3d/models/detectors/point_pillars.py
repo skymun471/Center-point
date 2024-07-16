@@ -36,44 +36,44 @@ class PointPillars(SingleStageDetector):
         return x
 
     def forward(self, example, return_loss=True, **kwargs):
-        voxels = example["voxels"]
-        coordinates = example["coordinates"]
-        num_points_in_voxel = example["num_points"]
-        num_voxels = example["num_voxels"]
-
-        batch_size = len(num_voxels)
-
-        data = dict(
-            features=voxels,
-            num_voxels=num_points_in_voxel,
-            coors=coordinates,
-            batch_size=batch_size,
-            input_shape=example["shape"][0],
-        )
-
-        x = self.extract_feat(data)
-        preds, _ = self.bbox_head(x)
-
-        print("=================================playground_0708================================")
-        # print(type(preds),len(preds), preds)
-        # hm_tensors = [item['hm'] for item in preds if 'hm' in item]
+        # voxels = example["voxels"]
+        # coordinates = example["coordinates"]
+        # num_points_in_voxel = example["num_points"]
+        # num_voxels = example["num_voxels"]
         #
-        # output_dir = '/home/milab20/PycharmProjects/Center_point/CenterPoint/hm_output'
-        # for i, hm in enumerate(hm_tensors):
-        #     file_path = os.path.join(output_dir, f'heatmap_{i}.png')
-        #     save_tensor_as_image(hm, file_path)
-        #     print(f'Saved heatmap {i} to {file_path}')
-
-        print("=================================playground_0708================================")
-
-        if return_loss:
-            return self.bbox_head.loss(example, preds, self.test_cfg)
-        else:
-            out = self.bbox_head.predict(example, preds, self.test_cfg)
-            # print(out)
-            return out
+        # batch_size = len(num_voxels)
+        #
+        # data = dict(
+        #     features=voxels,
+        #     num_voxels=num_points_in_voxel,
+        #     coors=coordinates,
+        #     batch_size=batch_size,
+        #     input_shape=example["shape"][0],
+        # )
+        #
+        # x = self.extract_feat(data)
+        # preds, _ = self.bbox_head(x)
+        #
+        # print("=================================playground_0708================================")
+        # # print(type(preds),len(preds), preds)
+        # # hm_tensors = [item['hm'] for item in preds if 'hm' in item]
+        # #
+        # # output_dir = '/home/milab20/PycharmProjects/Center_point/CenterPoint/hm_output'
+        # # for i, hm in enumerate(hm_tensors):
+        # #     file_path = os.path.join(output_dir, f'heatmap_{i}.png')
+        # #     save_tensor_as_image(hm, file_path)
+        # #     print(f'Saved heatmap {i} to {file_path}')
+        #
+        # print("=================================playground_0708================================")
+        #
+        # if return_loss:
+        #     return self.bbox_head.loss(example, preds, self.test_cfg)
+        # else:
+        #     out = self.bbox_head.predict(example, preds, self.test_cfg)
+        #     # print(out)
+        #     return out
         # 이걸로 하면 single_inference 안됨
-        # return self.forward_two_stage(example, return_loss, **kwargs)
+        return self.forward_two_stage(example, return_loss, **kwargs)
     def forward_two_stage(self, example, return_loss=True, **kwargs):
         voxels = example["voxels"]
         coordinates = example["coordinates"]
