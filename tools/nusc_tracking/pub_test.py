@@ -13,7 +13,11 @@ import copy
 import json
 import os
 import numpy as np
+
+# 이분을 치환해줘야한다.
 from pub_tracker import PubTracker as Tracker
+
+
 from nuscenes import NuScenes
 import json 
 import time
@@ -112,7 +116,11 @@ def main():
     args = parse_args()
     print('Deploy OK')
 
+
+    # ========================================================================
+    # Tracker 설정
     tracker = Tracker(max_age=args.max_age, hungarian=args.hungarian)
+    # ========================================================================
 
     with open(args.checkpoint, 'rb') as f:
         predictions=json.load(f)['results']
@@ -134,8 +142,13 @@ def main():
         # reset tracking after one video sequence
         if frames[i]['first']:
             # use this for sanity check to ensure your token order is correct
-            # print("reset ", i)
+            # print
+
+            # ========================================================================
+            # Tracker 초기화
             tracker.reset()
+            # ========================================================================
+
             last_time_stamp = frames[i]['timestamp']
 
         time_lag = (frames[i]['timestamp'] - last_time_stamp) 
@@ -143,7 +156,18 @@ def main():
 
         preds = predictions[token]
 
+        # 예측 결과값 확인
+        # print('예측 결과 확인:', preds)
+
+
+        # ========================================================================
+        # Tracking 수행
         outputs = tracker.step_centertrack(preds, time_lag)
+        # ========================================================================
+
+        # Tracking 예측 결과 확인
+        # print("Tracking 예측 결과: ",outputs)
+
         annos = []
 
         for item in outputs:

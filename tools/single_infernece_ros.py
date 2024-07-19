@@ -162,7 +162,7 @@ class Processor_ROS:
         torch.cuda.synchronize()
         print("  network predict time cost:", time.time() - t)
         # print(outputs)
-        outputs = remove_low_score_nu(outputs, 0.6)
+        outputs = remove_low_score_nu(outputs, 0.9)
 
         boxes_lidar = outputs["box3d_lidar"].detach().cpu().numpy()
         print("  predict boxes:", boxes_lidar.shape)
@@ -295,8 +295,8 @@ if __name__ == "__main__":
     global proc
     ## CenterPoint
     config_path = 'configs_tools/nusc/pp/nusc_centerpoint_pp_02voxel_two_pfn_10sweep_circular_nms.py'
-    model_path = '/home/milab20/PycharmProjects/Center_point/CenterPoint/work_dirs/pp_CenterPoint_pretrain/latest.pth'
-
+    # model_path = '/home/milab20/PycharmProjects/Center_point/CenterPoint/work_dirs/pp_CenterPoint_pretrain/latest.pth'
+    model_path= '/home/milab20/PycharmProjects/Center_point/CenterPoint/work_dirs/nusc_centerpoint_pp_02voxel_two_pfn_10sweep_circular_nms/latest.pth'
     proc_1 = Processor_ROS(config_path, model_path)
 
     proc_1.initialize()

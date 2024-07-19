@@ -247,8 +247,10 @@ def build_optimizer(model, optimizer_cfg):
         optimizer_cls = getattr(torch.optim, optimizer_cfg.pop("type"))
         return optimizer_cls(params, **optimizer_cfg)
 
-
+# train_detector가 처음 실행되는 함수
+# 위에 정의된 함수들을 불러다가 사용함.
 def train_detector(model, dataset, cfg, distributed=False, validate=False, logger=None):
+    # loger 설정
     if logger is None:
         logger = get_root_logger(cfg.log_level)
 
@@ -264,6 +266,8 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
 
     total_steps = cfg.total_epochs * len(data_loaders[0])
     # print(f"total_steps: {total_steps}")
+
+    # GPU 분산 설정 및 옵티마이저, 러닝스케쥴러 설정
     if distributed:
         model = apex.parallel.convert_syncbn_model(model)
     if cfg.lr_config.type == "one_cycle":
@@ -291,6 +295,7 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
     else:
         model = model.cuda()
 
+    # 모델 구조 print
     logger.info(f"model structure: {model}")
 
     trainer = Trainer(

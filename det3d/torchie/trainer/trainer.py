@@ -65,8 +65,10 @@ def example_to_device(example, device, non_blocking=False) -> dict:
 def parse_second_losses(losses):
 
     log_vars = OrderedDict()
-    loss = sum(losses["loss"])
-    for loss_name, loss_value in losses.items():
+    # print("losses",losses[2])
+    loss = sum(losses[2]["loss"])
+    # print(loss)
+    for loss_name, loss_value in losses[2].items():
         if loss_name == "loc_loss_elem":
             log_vars[loss_name] = [[i.item() for i in j] for j in loss_value]
         else:
