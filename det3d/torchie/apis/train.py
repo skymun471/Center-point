@@ -100,7 +100,6 @@ def batch_processor(model, data, train_mode, **kwargs):
     example = example_to_device(data, device, non_blocking=False)
 
     del data
-
     if train_mode:
         losses = model(example, return_loss=True)
         loss, log_vars = parse_second_losses(losses)
@@ -257,6 +256,7 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
     # start training
     # prepare data loaders
     dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
+    logger.info(f"dataset: {dataset}")
     data_loaders = [
         build_dataloader(
             ds, cfg.data.samples_per_gpu, cfg.data.workers_per_gpu, dist=distributed
@@ -329,3 +329,4 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
         trainer.load_checkpoint(cfg.load_from)
 
     trainer.run(data_loaders, cfg.workflow, cfg.total_epochs, local_rank=cfg.local_rank)
+

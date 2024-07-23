@@ -11,7 +11,7 @@ from det3d.core import box_torch_ops
 import torch
 from det3d.torchie.cnn import kaiming_init
 from torch import double, nn
-from det3d.models.losses.centernet_loss import FastFocalLoss, RegLoss
+from det3d.models.losses.centernet_loss import FastFocalLoss, RegLoss, IDLoss
 from det3d.models.utils import Sequential
 from ..registry import HEADS
 import copy 
@@ -186,6 +186,7 @@ class CenterHead(nn.Module):
         self.class_names = [t["class_names"] for t in tasks]
         self.code_weights = code_weights 
         self.weight = weight  # weight between hm loss and loc loss
+        self.weight_2 = 0.000001
         self.dataset = dataset
 
         self.in_channels = in_channels
@@ -193,6 +194,7 @@ class CenterHead(nn.Module):
 
         self.crit = FastFocalLoss()
         self.crit_reg = RegLoss()
+        self.crit_id = IDLoss()
 
         self.box_n_dim = 9 if 'vel' in common_heads else 7  
         self.use_direction_classifier = False 
@@ -275,10 +277,24 @@ class CenterHead(nn.Module):
 
             loc_loss = (box_loss*box_loss.new_tensor(self.code_weights)).sum()
 
-            loss = hm_loss + self.weight*loc_loss
+            # ===========================================================================
+            # 추가: ID 손실 계산
+            matches = example['matched']
+            j_matches = example['j_matched']
+            id_loss = self.crit_id(matches, j_matches)
+            # ===========================================================================
 
-            ret.update({'loss': loss, 'hm_loss': hm_loss.detach().cpu(), 'loc_loss':loc_loss, 'loc_loss_elem': box_loss.detach().cpu(), 'num_positive': example['mask'][task_id].float().sum()})
+            loss = hm_loss + self.weight*loc_loss + self.weight_2*id_loss
 
+            # ret.update({'loss': loss, 'hm_loss': hm_loss.detach().cpu(), 'loc_loss':loc_loss, 'loc_loss_elem': box_loss.detach().cpu(), 'num_positive': example['mask'][task_id].float().sum()})
+            ret.update({
+                'loss': loss,
+                'hm_loss': hm_loss.detach().cpu(),
+                'loc_loss': loc_loss,
+                'loc_loss_elem': box_loss.detach().cpu(),
+                'id_loss': id_loss.detach().cpu(),  # 추가된 부분
+                'num_positive': example['mask'][task_id].float().sum()
+            })
             rets.append(ret)
         
         """convert batch-key to key-batch

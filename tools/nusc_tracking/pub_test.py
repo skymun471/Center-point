@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-import sys 
+import sys
 import json
 import numpy as np
 import time
@@ -17,12 +17,12 @@ import numpy as np
 # 이분을 치환해줘야한다.
 from pub_tracker import PubTracker as Tracker
 
-
 from nuscenes import NuScenes
-import json 
+import json
 import time
 from nuscenes.utils import splits
 import torch
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Tracking Evaluation")
@@ -31,7 +31,8 @@ def parse_args():
         "--checkpoint", help="the dir to checkpoint which the model read from"
     )
     parser.add_argument("--hungarian", action='store_true')
-    parser.add_argument("--root", type=str, default="/home/milab20/PycharmProjects/Center_point/CenterPoint/data/nuScenes/")
+    parser.add_argument("--root", type=str,
+                        default="/home/milab20/PycharmProjects/Center_point/CenterPoint/data/nuScenes/")
     parser.add_argument("--version", type=str, default='v1.0-trainval')
     parser.add_argument("--max_age", type=int, default=3)
 
@@ -46,27 +47,27 @@ def save_first_frame():
     if args.version == 'v1.0-trainval':
         scenes = splits.val
     elif args.version == 'v1.0-test':
-        scenes = splits.test 
+        scenes = splits.test
     else:
         raise ValueError("unknown")
 
     frames = []
     for sample in nusc.sample:
-        scene_name = nusc.get("scene", sample['scene_token'])['name'] 
+        scene_name = nusc.get("scene", sample['scene_token'])['name']
         if scene_name not in scenes:
-            continue 
+            continue
 
         timestamp = sample["timestamp"] * 1e-6
         token = sample["token"]
         frame = {}
         frame['token'] = token
-        frame['timestamp'] = timestamp 
+        frame['timestamp'] = timestamp
 
         # start of a sequence
         if sample['prev'] == '':
-            frame['first'] = True 
+            frame['first'] = True
         else:
-            frame['first'] = False 
+            frame['first'] = False
         frames.append(frame)
 
     del nusc
@@ -74,7 +75,7 @@ def save_first_frame():
     res_dir = os.path.join(args.work_dir)
     if not os.path.exists(res_dir):
         os.makedirs(res_dir)
-    
+
     with open(os.path.join(args.work_dir, 'frames_meta.json'), "w") as f:
         json.dump({'frames': frames}, f)
 
@@ -112,10 +113,10 @@ def test_time():
 
     print("Speed is {} FPS".format(max(speeds)))
 
+
 def main():
     args = parse_args()
     print('Deploy OK')
-
 
     # ========================================================================
     # Tracker 설정
@@ -123,10 +124,10 @@ def main():
     # ========================================================================
 
     with open(args.checkpoint, 'rb') as f:
-        predictions=json.load(f)['results']
+        predictions = json.load(f)['results']
 
     with open(os.path.join(args.work_dir, 'frames_meta.json'), 'rb') as f:
-        frames=json.load(f)['frames']
+        frames = json.load(f)['frames']
 
     nusc_annos = {
         "results": {},
@@ -151,14 +152,13 @@ def main():
 
             last_time_stamp = frames[i]['timestamp']
 
-        time_lag = (frames[i]['timestamp'] - last_time_stamp) 
+        time_lag = (frames[i]['timestamp'] - last_time_stamp)
         last_time_stamp = frames[i]['timestamp']
 
         preds = predictions[token]
 
         # 예측 결과값 확인
-        # print('예측 결과 확인:', preds)
-
+        print('예측 결과 확인:', preds)
 
         # ========================================================================
         # Tracking 수행
@@ -172,7 +172,7 @@ def main():
 
         for item in outputs:
             if item['active'] == 0:
-                continue 
+                continue
             nusc_anno = {
                 "sample_token": token,
                 "translation": item['translation'],
@@ -186,12 +186,11 @@ def main():
             annos.append(nusc_anno)
         nusc_annos["results"].update({token: annos})
 
-    
     end = time.time()
 
-    second = (end-start) 
+    second = (end - start)
 
-    speed=size / second
+    speed = size / second
     print("The speed is {} FPS".format(speed))
 
     nusc_annos["meta"] = {
@@ -209,7 +208,6 @@ def main():
     with open(os.path.join(args.work_dir, 'tracking_result.json'), "w") as f:
         json.dump(nusc_annos, f)
     return speed
-
 
 
 if __name__ == '__main__':

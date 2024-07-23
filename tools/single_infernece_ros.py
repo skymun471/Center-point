@@ -163,7 +163,7 @@ class Processor_ROS:
         print("  network predict time cost:", time.time() - t)
         # print(outputs)
         outputs = remove_low_score_nu(outputs, 0.9)
-
+        print("outputs",outputs)
         boxes_lidar = outputs["box3d_lidar"].detach().cpu().numpy()
         print("  predict boxes:", boxes_lidar.shape)
 
@@ -220,6 +220,9 @@ def rslidar_callback(msg):
     print("  ")
     scores, dt_box_lidar, types = proc_1.run(np_p)
 
+    dets = dt_box_lidar[:, [0, 1, 2, 3, 4, 5, 6]]
+    info_data = np.stack((types, scores), axis=1)
+    # print("dt_box_lidar",dt_box_lidar)
     if scores.size != 0:
         for i in range(scores.size):
             bbox = BoundingBox()

@@ -45,7 +45,7 @@ class KF(Filter):
         return self.kf.x[7:]
 
 class AB3DMOT:
-    def __init__(self, ID_init=0):
+    def __init__(self, ID_init=1):
         self.trackers = []
         self.frame_count = 0
         self.ID_count = [ID_init]
@@ -53,15 +53,15 @@ class AB3DMOT:
         self.id_past_output = []
         self.id_past = []
         self.id_now_output = []
-        self.gate_threshold = 2
-        self.max_age = 4
-        self.min_hits = 3
+        self.gate_threshold = 3
+        self.max_age = 3
+        self.min_hits = 2
         self.affi_process = True
         self.affi_save_dir = '/home/milab20/PycharmProjects/Center_point/CenterPoint/tools/affi_graphs'
     def track(self, dets_all):
         dets, info = dets_all['dets'], dets_all['info']  # dets: N x 7, float numpy array
 
-        print(dets)
+        # print("dets in JPDA:", dets)
         self.frame_count += 1
 
         # Save the past outputs for ID correspondence during affinity processing
@@ -79,9 +79,9 @@ class AB3DMOT:
         matched, unmatched_dets, unmatched_trks, affi = \
             self.jpda_data_association(dets, trks, None, None, None, trk_innovation_matrix)
 
-        print(f"matched : {matched}")
-        print(f"unmatched : {unmatched_dets}")
-        print(f"unmatched_trks : {unmatched_trks}")
+        # print(f"matched : {matched}")
+        # print(f"unmatched : {unmatched_dets}")
+        # print(f"unmatched_trks : {unmatched_trks}")
 
         for track_idx in range(len(self.trackers)):
             if track_idx in matched:
@@ -118,11 +118,11 @@ class AB3DMOT:
                 self.trackers[track_idx].time_since_update += 1
 
         new_id_list = self.birth(dets, info, unmatched_dets)
-        print("new_id_list: ", new_id_list)
+        # print("new_id_list: ", new_id_list)
         # print(5)
         # Collect the results to return
         results = self.output()
-        print("results:", results)
+        # print("results:", results)
         # print(6)
         if len(results) > 0:
             results = [np.concatenate(results)]  # h,w,l,x,y,z,theta, ID, other info, confidence
@@ -130,14 +130,18 @@ class AB3DMOT:
             results = [np.empty((0, 10))]
 
         self.id_now_output = results[0][:, 7].tolist()  # Only the active tracks that are outputted
-        print("id_now_output", self.id_now_output)
+        # print("id_now_output", self.id_now_output)
         if self.affi_process:
             affi = self.process_affi(affi, matched, unmatched_dets, new_id_list)
         # print(11)
-        self.save_affi_graph(affi, self.frame_count)
-        print("iter Tracking Finish!")
-        print("=====================================================================")
-        return results, affi
+
+        # matched_list = [(trk_idx, det_idx) for trk_idx, det_idxs in matched.items() for det_idx in det_idxs]
+        matched_list = [[det_idx, trk_idx] for trk_idx, det_idxs in matched.items() for det_idx in det_idxs]
+        sorted_matched_list = sorted(matched_list, key=lambda x: x[0])
+        # self.save_affi_graph(affi, self.frame_count)
+        # print("iter Tracking Finish!")
+        # print("=====================================================================")
+        return results, affi, sorted_matched_list, unmatched_dets, unmatched_trks
 
     def save_affi_graph(self, affi, frame_number):
         plt.figure(figsize=(10, 8))
@@ -164,13 +168,13 @@ class AB3DMOT:
                 info_flat = np.array(trk.info).flatten()
                 results.append(np.concatenate((d, [trk.id], info_flat)).reshape(1, -1))
             else:
-                print("Tracker does not meet the conditions.")
-
+                # print("Tracker does not meet the conditions.")
+                pass
             num_trks -= 1
 
             # 소멸 조건 확인: 최대 업데이트 시간 초과
             if (trk.time_since_update >= self.max_age):
-                print("Removing tracker ID:", trk.id)
+                # print("Removing tracker ID:", trk.id)
                 self.trackers.pop(num_trks)
 
         # 디버깅 출력: 최종 결과
@@ -355,11 +359,68 @@ class AB3DMOT:
     #
     #     return matched, unmatched_dets, unmatched_trks, posterior_probs
 
+    # def jpda_data_association(self, dets, trks, metric, thres, algm, innovation_matrices):
+    #     num_tracks = len(trks)
+    #     num_detections = len(dets)
+    #     # print("num_tracks", num_tracks)
+    #     # print("num_detections", num_detections)
+    #     association_probs = np.zeros((num_tracks, num_detections))
+    #
+    #     inv_innovation_matrices = [np.linalg.inv(matrix) for matrix in innovation_matrices]
+    #
+    #     for t_idx in range(num_tracks):
+    #         for d_idx in range(num_detections):
+    #             distance = self.m_distance(dets[d_idx], trks[t_idx], inv_innovation_matrices[t_idx])
+    #             if distance < self.gate_threshold:
+    #                 probability = np.exp(-0.5 * distance)
+    #             else:
+    #                 probability = 0.0
+    #             association_probs[t_idx][d_idx] = probability
+    #
+    #     # print("association_probs:", association_probs)
+    #
+    #     for t_idx in range(num_tracks):
+    #         if np.sum(association_probs[t_idx]) > 0:
+    #             association_probs[t_idx] /= np.sum(association_probs[t_idx])
+    #     # print("nor_association_probs:", association_probs)
+    #
+    #     log_association_probs = np.log(association_probs + 1e-9)
+    #
+    #     # Use gating to reduce the number of valid assignments
+    #     valid_assignments = []
+    #     for t_idx in range(num_tracks):
+    #         valid_dets = np.where(association_probs[t_idx] > 0)[0]
+    #         valid_assignments.extend(itertools.product([t_idx], valid_dets))
+    #
+    #     posterior_probs = np.zeros((num_tracks, num_detections))
+    #     for (t_idx, d_idx) in valid_assignments:
+    #         if log_association_probs[t_idx][d_idx] != -np.inf:
+    #             posterior_probs[t_idx][d_idx] += np.exp(log_association_probs[t_idx][d_idx])
+    #
+    #     for t_idx in range(num_tracks):
+    #         if np.sum(posterior_probs[t_idx]) > 0:
+    #             posterior_probs[t_idx] /= np.sum(posterior_probs[t_idx])
+    #     # print("posterior_probs:", posterior_probs)
+    #
+    #     row_ind, col_ind = linear_sum_assignment(-posterior_probs)
+    #
+    #     matched_detections = set()
+    #     matched = {}
+    #     for t_idx, d_idx in zip(row_ind, col_ind):
+    #         if association_probs[t_idx][d_idx] > 0:
+    #             matched[t_idx] = [d_idx]
+    #             matched_detections.add(d_idx)
+    #
+    #     unmatched_dets = [d_idx for d_idx in range(num_detections) if d_idx not in matched_detections]
+    #     unmatched_trks = [t_idx for t_idx in range(num_tracks) if t_idx not in matched]
+    #
+    #     return matched, unmatched_dets, unmatched_trks, posterior_probs
+
     def jpda_data_association(self, dets, trks, metric, thres, algm, innovation_matrices):
         num_tracks = len(trks)
         num_detections = len(dets)
-        print("num_tracks", num_tracks)
-        print("num_detections", num_detections)
+        # print("num_tracks", num_tracks)
+        # print("num_detections", num_detections)
         association_probs = np.zeros((num_tracks, num_detections))
 
         inv_innovation_matrices = [np.linalg.inv(matrix) for matrix in innovation_matrices]
@@ -367,22 +428,24 @@ class AB3DMOT:
         for t_idx in range(num_tracks):
             for d_idx in range(num_detections):
                 distance = self.m_distance(dets[d_idx], trks[t_idx], inv_innovation_matrices[t_idx])
+                # print("distance",distance)
                 if distance < self.gate_threshold:
                     probability = np.exp(-0.5 * distance)
                 else:
                     probability = 0.0
                 association_probs[t_idx][d_idx] = probability
 
-        print("association_probs:", association_probs)
+        # print("association_probs:", association_probs)
 
         for t_idx in range(num_tracks):
-            if np.sum(association_probs[t_idx]) > 0:
-                association_probs[t_idx] /= np.sum(association_probs[t_idx])
-        print("nor_association_probs:", association_probs)
+            valid_prob_indices = association_probs[t_idx] > 0
+            valid_probs_sum = np.sum(association_probs[t_idx][valid_prob_indices])
+            if valid_probs_sum > 0:
+                association_probs[t_idx][valid_prob_indices] /= valid_probs_sum
+        # print("nor_association_probs:", association_probs)
 
         log_association_probs = np.log(association_probs + 1e-9)
 
-        # Use gating to reduce the number of valid assignments
         valid_assignments = []
         for t_idx in range(num_tracks):
             valid_dets = np.where(association_probs[t_idx] > 0)[0]
@@ -394,9 +457,11 @@ class AB3DMOT:
                 posterior_probs[t_idx][d_idx] += np.exp(log_association_probs[t_idx][d_idx])
 
         for t_idx in range(num_tracks):
-            if np.sum(posterior_probs[t_idx]) > 0:
-                posterior_probs[t_idx] /= np.sum(posterior_probs[t_idx])
-        print("posterior_probs:", posterior_probs)
+            valid_prob_indices = posterior_probs[t_idx] > 0
+            valid_probs_sum = np.sum(posterior_probs[t_idx][valid_prob_indices])
+            if valid_probs_sum > 0:
+                posterior_probs[t_idx][valid_prob_indices] /= valid_probs_sum
+        # print("posterior_probs:", posterior_probs)
 
         row_ind, col_ind = linear_sum_assignment(-posterior_probs)
 
@@ -411,4 +476,3 @@ class AB3DMOT:
         unmatched_trks = [t_idx for t_idx in range(num_tracks) if t_idx not in matched]
 
         return matched, unmatched_dets, unmatched_trks, posterior_probs
-

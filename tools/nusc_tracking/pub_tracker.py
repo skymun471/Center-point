@@ -2,9 +2,14 @@ import numpy as np
 import copy
 from track_utils import greedy_assignment
 from scipy.optimize import linear_sum_assignment as linear_assignment
-import copy 
+import copy
 import importlib
-import sys 
+import sys
+
+association_module_dir = '/home/milab20/PycharmProjects/Center_point/CenterPoint/tools/'
+sys.path.append(association_module_dir)
+
+from Associate import AB3DMOT  # 위 코드가 포함된 파일명을 ab3dmot.py로 가정
 
 NUSCENES_TRACKING_NAMES = [
     'bicycle',
@@ -20,17 +25,20 @@ NUSCENES_TRACKING_NAMES = [
 # 99.9 percentile of the l2 velocity error distribution (per clss / 0.5 second)
 # This is an earlier statistcs and I didn't spend much time tuning it.
 # Tune this for your model should provide some considerable AMOTA improvement
+# NUSCENE_CLS_VELOCITY_ERROR = {
+#   'car':4,
+#   'truck':4,
+#   'bus':5.5,
+#   'trailer':3,
+#   'pedestrian':1,
+#   'motorcycle':13,
+#   'bicycle':3,
+# }
+
 NUSCENE_CLS_VELOCITY_ERROR = {
-  'car':4,
-  'truck':4,
-  'bus':5.5,
-  'trailer':3,
-  'pedestrian':1,
-  'motorcycle':13,
-  'bicycle':3,  
+    0: 4.0, 1: 4.0, 2: 4.0, 3: 4.0, 4: 4.0,
+    5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0, 9: 1.0
 }
-
-
 
 class PubTracker(object):
   def __init__(self,  hungarian=False, max_age=0):
@@ -40,25 +48,53 @@ class PubTracker(object):
     print("Use hungarian: {}".format(hungarian))
 
     self.NUSCENE_CLS_VELOCITY_ERROR = NUSCENE_CLS_VELOCITY_ERROR
-
+    self.tracker = AB3DMOT(ID_init=0)  # 트래커 초기화
     self.reset()
-  
+
   def reset(self):
     self.id_count = 0
     self.tracks = []
 
-  def step_centertrack(self, results, time_lag):
+  def step_centertrack(self, data, time_lag):
     # 만약 results가 비어있다면, self.tracks도 비우고 빈 리스트를 반환
-    if len(results) == 0:
+    if len(data) == 0:
+      # print("dfsdfsfsdfsfsdfsdf")
       self.tracks = []
       return []
+
     else:
+
       temp = []
+
+      results = []
+
+      for item in data:
+        box3d_lidar = item['box3d_lidar'].cpu().numpy()
+        scores = item['scores'].cpu().numpy()
+        label_preds = item['label_preds'].cpu().numpy()
+        token = item['metadata']['token']
+
+        for i in range(len(box3d_lidar)):
+          result = {
+            'sample_token': token,
+            'translation': box3d_lidar[i][:3].tolist(),
+            'velocity': box3d_lidar[i][3:5].tolist(),
+            'size': box3d_lidar[i][5:8].tolist(),
+            'rotation': box3d_lidar[i][8].tolist(),
+            'detection_score': scores[i].item(),
+            'label_preds': int(label_preds[i]),
+            'detection_name': 'unknown',
+            'attribute_name': 'unknown'  # Replace with the correct attribute if available
+          }
+          results.append(result)
+
+
+
       for det in results:
         # filter out classes not evaluated for tracking
         # NUSCENES_TRACKING_NAMES에 포함되지 않은 클래스는 필터링하여 무시
-        if det['detection_name'] not in NUSCENES_TRACKING_NAMES:
-          continue
+        # if det['detection_name'] not in NUSCENES_TRACKING_NAMES:
+        #   continue
 
         # translation의 처음 두 요소를 numpy 배열로 변환하여 'ct'에 저장 (중심 좌표)
         det['ct'] = np.array(det['translation'][:2])
@@ -67,12 +103,19 @@ class PubTracker(object):
         det['tracking'] = np.array(det['velocity'][:2]) * -1 * time_lag
 
         # detection_name을 인덱스로 변환하여 'label_preds'에 저장
-        det['label_preds'] = NUSCENES_TRACKING_NAMES.index(det['detection_name'])
+        # det['label_preds'] = NUSCENES_TRACKING_NAMES.index(det['detection_name'])
+
+        # print("dsdsdsdsds",det['label_preds'])
         temp.append(det)
 
       # 유효한 detections만 포함된 리스트로 갱신
       results = temp
 
+
+      # 데이터 추출 및 변환
+
+
+    # print(results)
     # =======================================================================================================
     # print("위 조건에 의해 정제된 det 데이터 확인", results)
     '''
@@ -91,6 +134,53 @@ class PubTracker(object):
      '''
     # =======================================================================================================
 
+
+
+    # ================================================JPDA================================================
+    score_threshold = 0.3
+    box3d_lidar_list = []
+    scores_list = []
+    label_preds_list = []
+
+    for output in results:
+      box3d_lidar = np.array([output["translation"] + [output["size"][1], output["size"][0], output["size"][2],
+                                                       output["rotation"]]])
+      scores = np.array([output["detection_score"]])
+      label_preds = np.array([output["label_preds"]])
+
+      mask = scores >= score_threshold
+      box3d_lidar = box3d_lidar[mask]
+      scores = scores[mask]
+      label_preds = label_preds[mask]
+
+      box3d_lidar_list.append(box3d_lidar)
+      scores_list.append(scores)
+      label_preds_list.append(label_preds)
+
+    box3d_lidar = np.concatenate(box3d_lidar_list, axis=0)
+    scores = np.concatenate(scores_list, axis=0)
+    label_preds = np.concatenate(label_preds_list, axis=0)
+
+    # dets format : hwlxyzo (height, width, length, x, y, z, orientation)
+    dets = box3d_lidar[:, [5, 4, 3, 0, 1, 2, 6]]  # z, w, l, x, y, z, o
+    # print("dets:", dets)
+    info_data = np.stack((label_preds, scores), axis=1)
+
+    dic_dets = {
+      'dets': dets,
+      'info': info_data
+    }
+
+    # JPDA를 사용하여 추적 수행
+    jpda_results, affi, mat, un_mat, un_trk = self.tracker.track(dic_dets)
+
+    # print("JPDA results",jpda_results)
+    # print("mat:",   mat)
+    # print("un_mat", un_mat)
+    # print("un_trk", un_trk)
+    # ================================================JPDA================================================
+
+    # ===========================================Center_track(1)==================================+==========
     # 현재 프레임의 detection 수
     N = len(results)
 
@@ -127,9 +217,15 @@ class PubTracker(object):
     track_cat = np.array([track['label_preds'] for track in self.tracks], np.int32) # M
 
     # 각 detection의 클래스별 최대 허용 거리 오차 배열
-    max_diff = np.array([self.NUSCENE_CLS_VELOCITY_ERROR[box['detection_name']] for box in results], np.float32)
+    # max_diff = np.array([self.NUSCENE_CLS_VELOCITY_ERROR[box['detection_name']] for box in results], np.float32)
+
+    max_diff = np.array([NUSCENE_CLS_VELOCITY_ERROR[int(box['label_preds'])] for box in results], np.float32)
+
+    # max_diff = np.array([NUSCENE_CLS_VELOCITY_ERROR[int(label)] for box in results for label in box['label_preds']],
+                        # np.float32)
     # =======================================================================================================
     # print("각 detection의 클래스별 최대 허용 거리 오차 배열",max_diff)
+
     '''
     max_diff
     [ 4.   4.   4.   4.   4.   4.   4.   4.   4.   4.   4.   4.   4.   4.
@@ -183,8 +279,6 @@ class PubTracker(object):
       # 행과 열의 개수가 Trk와 det의 개수
       '''
       dist 행렬 확인:  (133, 152)
-      dist 행렬 확인:  (145, 219)
-      dist 행렬 확인:  (158, 276)
       '''
       # ==========================================================
 
@@ -196,7 +290,7 @@ class PubTracker(object):
         # 결과의 전치 (행과 열을 바꿔서) 행렬 형태로 변환
         matched_indices = matched_indices.transpose()
         # ==========================================================
-        print("matched_indices 행렬",matched_indices)
+        # print("matched_indices 행렬",matched_indices)
         # ==========================================================
       else:
         # 탐욕 알고리즘을 사용하여 매칭 수행
@@ -253,16 +347,38 @@ class PubTracker(object):
 
     # print("matches", matches)
 
+    # ===========================================Center_track(1)==================================+==========
 
     '''
     matches, unmatched_dets, unmatched_tracks의 값을 리스트 형태로 변환해서 넣어주면 된다.
     but 칼만필터를 어떻게 적용해야 할 것인가?
     '''
+    # TODO: (1)
+    # results리스트로 변환해야함
 
+    J_matches, j_unmatched_dets, j_unmatched_tracks = mat, un_mat, un_trk
+    j_matches = np.array(J_matches).reshape(-1,2)
+
+
+    # print("matches",matches)
+    # print("j_matches",j_matches)
+    # print("unmatched_dets",unmatched_dets)
+    # print("unmatched_tracks",unmatched_tracks)
+
+
+
+    # 두 딕셔너리를 비교하여 다른 trk id의 수를 카운트
+    # loss_count = 0
+    # for det_id in matches_dict:
+    #   if det_id in j_matches_dict and matches_dict[det_id] != j_matches_dict[det_id]:
+    #     loss_count += 1
+    #
+    # print("loss_count", loss_count)
 
     ret = []
     for m in matches:
       track = results[m[0]]
+      # print(track)
       # 기존 track의 tracking_id를 사용
       track['tracking_id'] = self.tracks[m[1]]['tracking_id']
       # 새로 매칭된 track의 나이 및 활성 상태 갱신
@@ -272,6 +388,7 @@ class PubTracker(object):
 
     for i in unmatched_dets:
       track = results[i]
+      # print("unmatcehd_track", track)
       # 새로운 tracking_id 할당
       self.id_count += 1
       track['tracking_id'] = self.id_count
@@ -281,8 +398,8 @@ class PubTracker(object):
       ret.append(track)
 
     # 매칭되지 않은 track들 중 나이가 max_age 이하인 것들은 여전히 저장하지만, 현재 프레임에서는 출력하지 않음
-    # still store unmatched tracks if its age doesn't exceed max_age, however, we shouldn't output 
-    # the object in current frame 
+    # still store unmatched tracks if its age doesn't exceed max_age, however, we shouldn't output
+    # the object in current frame
     for i in unmatched_tracks:
       track = self.tracks[i]
       if track['age'] < self.max_age:
@@ -295,9 +412,11 @@ class PubTracker(object):
         # 지난 시간 동안의 이동 계산
         # movement in the last second
         if 'tracking' in track:
-            offset = track['tracking'] * -1 # move forward 
-            track['ct'] = ct + offset 
+            offset = track['tracking'] * -1 # move forward
+            track['ct'] = ct + offset
         ret.append(track)
 
     self.tracks = ret
-    return ret
+    # print("ret",self.tracks)
+
+    return ret, matches, j_matches

@@ -19,6 +19,8 @@ class RegLoss(nn.Module):
     mask = mask.float().unsqueeze(2) 
 
     loss = F.l1_loss(pred*mask, target*mask, reduction='none')
+
+
     loss = loss / (mask.sum() + 1e-4)
     loss = loss.transpose(2 ,0).sum(dim=2).sum(dim=1)
     return loss
@@ -52,3 +54,33 @@ class FastFocalLoss(nn.Module):
     if num_pos == 0:
       return - neg_loss
     return - (pos_loss + neg_loss) / num_pos
+
+
+class IDLoss(nn.Module):
+  def __init__(self):
+    super(IDLoss, self).__init__()
+
+  def forward(self, matches, j_matches):
+    # matches와 j_matches는 각각 [N, 2] 형태의 배열입니다.
+    # 첫 번째 열은 detection ID, 두 번째 열은 track ID를 나타냅니다.
+
+    # matches 및 j_matches를 딕셔너리로 변환하여 ID를 쉽게 찾을 수 있게 합니다.
+    det_to_track = {det_id: track_id for det_id, track_id in matches}
+    jpda_to_track = {det_id: track_id for det_id, track_id in j_matches}
+
+    total_loss = 0.0
+    count = 0
+
+    # 각 detection ID가 대응하는 track ID와 일치하지 않는 경우에 대해 패널티를 부여합니다.
+    for det_id, track_id in det_to_track.items():
+      if det_id in jpda_to_track:
+        jpda_track_id = jpda_to_track[det_id]
+        if track_id != jpda_track_id:
+          loss = F.mse_loss(torch.tensor(track_id).float(), torch.tensor(jpda_track_id).float(), reduction='mean')
+          total_loss += loss
+          count += 1
+
+    if count == 0:
+      return torch.tensor(0.0)
+
+    return total_loss / count
