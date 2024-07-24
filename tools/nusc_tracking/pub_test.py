@@ -15,7 +15,8 @@ import os
 import numpy as np
 
 # 이분을 치환해줘야한다.
-from pub_tracker import PubTracker as Tracker
+# from pub_tracker import PubTracker as Tracker
+from pub_tracker_origin import PubTracker as Tracker
 
 from nuscenes import NuScenes
 import json

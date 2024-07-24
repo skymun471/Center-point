@@ -60,7 +60,7 @@ class PubTracker(object):
     if len(data) == 0:
       # print("dfsdfsfsdfsfsdfsdf")
       self.tracks = []
-      return []
+      return [], [], []
 
     else:
 
@@ -153,9 +153,17 @@ class PubTracker(object):
       scores = scores[mask]
       label_preds = label_preds[mask]
 
-      box3d_lidar_list.append(box3d_lidar)
-      scores_list.append(scores)
-      label_preds_list.append(label_preds)
+      # box3d_lidar_list.append(box3d_lidar)
+      # scores_list.append(scores)
+      # label_preds_list.append(label_preds)
+
+      if box3d_lidar.size > 0:
+        box3d_lidar_list.append(box3d_lidar)
+        scores_list.append(scores)
+        label_preds_list.append(label_preds)
+
+    if not box3d_lidar_list:
+      return [], [], []
 
     box3d_lidar = np.concatenate(box3d_lidar_list, axis=0)
     scores = np.concatenate(scores_list, axis=0)

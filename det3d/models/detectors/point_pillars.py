@@ -31,6 +31,7 @@ class PointPillars(SingleStageDetector):
         )
         self.tracker = Tracker(max_age=3, hungarian=False)
         self.tracker.reset()
+        self.total_steps = None
 
     def extract_feat(self, data):
         input_features = self.reader(
@@ -80,6 +81,8 @@ class PointPillars(SingleStageDetector):
         #     out = self.bbox_head.predict(example, preds, self.test_cfg)
         #     # print(out)
         #     return out
+
+
         # 이걸로 하면 single_inference 안됨
         return self.forward_two_stage(example, return_loss, **kwargs)
     def forward_two_stage(self, example, return_loss=True, **kwargs):
@@ -99,7 +102,9 @@ class PointPillars(SingleStageDetector):
         )
 
         x = self.extract_feat(data)
-        bev_feature = x 
+        bev_feature = x
+
+        # print("bev_feature",bev_feature.shape)
         preds, _ = self.bbox_head(x)
 
         # print("example",example)
@@ -117,11 +122,17 @@ class PointPillars(SingleStageDetector):
         # print("===================================================")
         # print("Two_stage",boxes)
 
-        outputs, matched, j_matched = self.tracker.step_centertrack(boxes, 1.0)
+        # JPDA Center_track 계산
+        # ==================================================================================
+        # outputs, matched, j_matched = self.tracker.step_centertrack(boxes, 1.0)
         # print("outputs:",matched, j_matched)
 
-        example['matched'] = matched
-        example['j_matched'] = j_matched
+
+        # example['matched'] = matched
+        # example['j_matched'] = j_matched
+        # print(self.bbox_head.loss(example, preds, self.test_cfg))
+        # ==================================================================================
+
 
         if return_loss:
             return boxes, bev_feature, self.bbox_head.loss(example, preds, self.test_cfg)

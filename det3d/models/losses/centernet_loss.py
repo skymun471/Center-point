@@ -84,3 +84,27 @@ class IDLoss(nn.Module):
       return torch.tensor(0.0)
 
     return total_loss / count
+
+
+class SimpleIDLoss(nn.Module):
+  def __init__(self):
+    super(SimpleIDLoss, self).__init__()
+
+  def forward(self, matches, j_matches):
+    # matches와 j_matches는 각각 [N, 2] 형태의 배열입니다.
+    # 첫 번째 열은 detection ID, 두 번째 열은 track ID를 나타냅니다.
+
+    # matches 및 j_matches를 딕셔너리로 변환하여 ID를 쉽게 찾을 수 있게 합니다.
+    det_to_track = {det_id: track_id for det_id, track_id in matches}
+    jpda_to_track = {det_id: track_id for det_id, track_id in j_matches}
+
+    total_loss = 0.0
+
+    # 각 detection ID가 대응하는 track ID와 일치하지 않는 경우에 대해 패널티를 부여합니다.
+    for det_id, track_id in det_to_track.items():
+      if det_id in jpda_to_track:
+        jpda_track_id = jpda_to_track[det_id]
+        if track_id != jpda_track_id:
+          total_loss += 1
+
+    return torch.tensor(total_loss, requires_grad=True)  # torch.tensor로 변환하여 반환

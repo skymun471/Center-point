@@ -11,7 +11,7 @@ from det3d.core import box_torch_ops
 import torch
 from det3d.torchie.cnn import kaiming_init
 from torch import double, nn
-from det3d.models.losses.centernet_loss import FastFocalLoss, RegLoss, IDLoss
+from det3d.models.losses.centernet_loss import FastFocalLoss, RegLoss, IDLoss, SimpleIDLoss
 from det3d.models.utils import Sequential
 from ..registry import HEADS
 import copy 
@@ -21,6 +21,8 @@ except:
     print("Deformable Convolution not built!")
 
 from det3d.core.utils.circle_nms_jit import circle_nms
+from torch.utils.tensorboard import SummaryWriter
+
 
 class FeatureAdaption(nn.Module):
     """Feature Adaption Module.
@@ -62,35 +64,87 @@ class FeatureAdaption(nn.Module):
         x = self.relu(self.conv_adaption(x, offset))
         return x
 
+# class SepHead(nn.Module):
+#     def __init__(
+#         self,
+#         in_channels,
+#         heads,
+#         head_conv=64,
+#         final_kernel=1,
+#         bn=False,
+#         init_bias=-2.19,
+#         **kwargs,
+#     ):
+#         super(SepHead, self).__init__(**kwargs)
+#
+#         self.heads = heads
+#         for head in self.heads:
+#             classes, num_conv = self.heads[head]
+#
+#             fc = Sequential()
+#             for i in range(num_conv-1):
+#                 fc.add(nn.Conv2d(in_channels, head_conv,
+#                     kernel_size=final_kernel, stride=1,
+#                     padding=final_kernel // 2, bias=True))
+#                 if bn:
+#                     fc.add(nn.BatchNorm2d(head_conv))
+#                 fc.add(nn.ReLU())
+#
+#             fc.add(nn.Conv2d(head_conv, classes,
+#                     kernel_size=final_kernel, stride=1,
+#                     padding=final_kernel // 2, bias=True))
+#
+#             if 'hm' in head:
+#                 fc[-1].bias.data.fill_(init_bias)
+#             else:
+#                 for m in fc.modules():
+#                     if isinstance(m, nn.Conv2d):
+#                         kaiming_init(m)
+#
+#             self.__setattr__(head, fc)
+#
+#
+#     def forward(self, x):
+#         ret_dict = dict()
+#         for head in self.heads:
+#             ret_dict[head] = self.__getattr__(head)(x)
+#
+#         return ret_dict
+
 class SepHead(nn.Module):
     def __init__(
-        self,
-        in_channels,
-        heads,
-        head_conv=64,
-        final_kernel=1,
-        bn=False,
-        init_bias=-2.19,
-        **kwargs,
+            self,
+            in_channels,
+            heads,
+            head_conv=64,
+            final_kernel=1,
+            bn=False,
+            init_bias=-2.19,
+            **kwargs,
     ):
         super(SepHead, self).__init__(**kwargs)
 
-        self.heads = heads 
+        self.heads = heads
+        self.in_channels = in_channels  # 원래의 in_channels 값을 저장
+
         for head in self.heads:
             classes, num_conv = self.heads[head]
 
+            # 'vel' 헤드의 경우 입력 채널을 1만큼 증가
+            head_in_channels = self.in_channels + 1 if head == 'vel' else self.in_channels
+
             fc = Sequential()
-            for i in range(num_conv-1):
-                fc.add(nn.Conv2d(in_channels, head_conv,
-                    kernel_size=final_kernel, stride=1, 
-                    padding=final_kernel // 2, bias=True))
+            for i in range(num_conv - 1):
+                fc.add(nn.Conv2d(head_in_channels, head_conv,
+                                 kernel_size=final_kernel, stride=1,
+                                 padding=final_kernel // 2, bias=True))
                 if bn:
                     fc.add(nn.BatchNorm2d(head_conv))
                 fc.add(nn.ReLU())
 
             fc.add(nn.Conv2d(head_conv, classes,
-                    kernel_size=final_kernel, stride=1, 
-                    padding=final_kernel // 2, bias=True))    
+                             kernel_size=final_kernel, stride=1,
+                             padding=final_kernel // 2, bias=True))
 
             if 'hm' in head:
                 fc[-1].bias.data.fill_(init_bias)
@@ -100,12 +154,25 @@ class SepHead(nn.Module):
                         kaiming_init(m)
 
             self.__setattr__(head, fc)
-        
 
     def forward(self, x):
-        ret_dict = dict()        
+        ret_dict = dict()
+        print("이거 맞아????")
+        # 먼저 'hm' task를 처리
+        cls_score = self.__getattr__('hm')(x)
+        ret_dict['hm'] = cls_score
+
+        # 'hm' 결과를 이용하여 클래스 예측
+        cls_pred = torch.argmax(cls_score, dim=1, keepdim=True).float()
+        x_with_cls = torch.cat([x, cls_pred], dim=1)
+
         for head in self.heads:
-            ret_dict[head] = self.__getattr__(head)(x)
+            if head == 'hm':
+                continue  # 이미 처리된 'hm'은 건너뜀
+            elif head == 'vel':
+                ret_dict[head] = self.__getattr__(head)(x_with_cls)  # 속도 예측에 결합된 특징 맵 사용
+            else:
+                ret_dict[head] = self.__getattr__(head)(x)
 
         return ret_dict
 
@@ -188,6 +255,7 @@ class CenterHead(nn.Module):
         self.weight = weight  # weight between hm loss and loc loss
         self.weight_2 = 0.000001
         self.dataset = dataset
+        self.iter = 0
 
         self.in_channels = in_channels
         self.num_classes = num_classes
@@ -195,6 +263,7 @@ class CenterHead(nn.Module):
         self.crit = FastFocalLoss()
         self.crit_reg = RegLoss()
         self.crit_id = IDLoss()
+        # self.crit_id = SimpleIDLoss()
 
         self.box_n_dim = 9 if 'vel' in common_heads else 7  
         self.use_direction_classifier = False 
@@ -218,6 +287,10 @@ class CenterHead(nn.Module):
         self.tasks = nn.ModuleList()
         print("Use HM Bias: ", init_bias)
 
+        # ==============추가===============
+        # self.vel_heads = nn.ModuleDict()
+        # ==============추가===============
+
         if dcn_head:
             print("Use Deformable Convolution in the CenterHead!")
 
@@ -230,10 +303,14 @@ class CenterHead(nn.Module):
                 )
             else:
                 self.tasks.append(
-                    DCNSepHead(share_conv_channel, num_cls, heads, bn=True, init_bias=init_bias, final_kernel=3)
-                )
+                    DCNSepHead(share_conv_channel, num_cls, heads, bn=True, init_bias=init_bias, final_kernel=3))
 
         logger.info("Finish CenterHead Initialization")
+
+        self.writer = SummaryWriter(log_dir='/home/milab20/PycharmProjects/Center_point/CenterPoint/work_dirs/nusc_centerpoint_pp_02voxel_two_pfn_10sweep_circular_nms/runs')
+
+    # def __del__(self):
+    #     self.writer.close()
 
     def forward(self, x, *kwargs):
         ret_dicts = []
@@ -241,8 +318,8 @@ class CenterHead(nn.Module):
         x = self.shared_conv(x)
 
         for task in self.tasks:
+            # print("task:",task)
             ret_dicts.append(task(x))
-
         return ret_dicts, x
 
     def _sigmoid(self, x):
@@ -251,6 +328,7 @@ class CenterHead(nn.Module):
 
     def loss(self, example, preds_dicts, test_cfg, **kwargs):
         rets = []
+        # total_steps = kwargs.get('total_steps')  # total_steps 속성 가져오기, 없으면 기본값 10000 사용
         for task_id, preds_dict in enumerate(preds_dicts):
             # heatmap focal loss
             preds_dict['hm'] = self._sigmoid(preds_dict['hm'])
@@ -277,14 +355,28 @@ class CenterHead(nn.Module):
 
             loc_loss = (box_loss*box_loss.new_tensor(self.code_weights)).sum()
 
+            # JPDA Center track 결과 전송 부분
             # ===========================================================================
             # 추가: ID 손실 계산
-            matches = example['matched']
-            j_matches = example['j_matched']
-            id_loss = self.crit_id(matches, j_matches)
+            # id_loss = self.crit_id(example['matched'],  example['j_matched'])
+            # print("loc_loss",loc_loss)
+            # print("id_loss", id_loss)
             # ===========================================================================
 
-            loss = hm_loss + self.weight*loc_loss + self.weight_2*id_loss
+
+
+            # loss = hm_loss + self.weight * cls_loss
+            # loss = hm_loss + self.weight*loc_loss + self.weight_2*id_loss
+            loss = hm_loss + self.weight * loc_loss
+
+            # print("id_loss", self.weight_2*id_loss)
+            # print("id_loss_or",id_loss)
+            # TensorBoard에 손실 기록
+            self.writer.add_scalar('Loss/total_loss', loss, self.iter)
+            self.writer.add_scalar('Loss/hm_loss', hm_loss.detach().cpu(), self.iter)
+            self.writer.add_scalar('Loss/box_loss', box_loss.sum().detach().cpu().item(), self.iter)
+            self.writer.add_scalar('Loss/loc_loss', loc_loss, self.iter)
+            # self.writer.add_scalar('Loss/id_loss',  self.weight_2*id_loss, self.iter)
 
             # ret.update({'loss': loss, 'hm_loss': hm_loss.detach().cpu(), 'loc_loss':loc_loss, 'loc_loss_elem': box_loss.detach().cpu(), 'num_positive': example['mask'][task_id].float().sum()})
             ret.update({
@@ -292,18 +384,20 @@ class CenterHead(nn.Module):
                 'hm_loss': hm_loss.detach().cpu(),
                 'loc_loss': loc_loss,
                 'loc_loss_elem': box_loss.detach().cpu(),
-                'id_loss': id_loss.detach().cpu(),  # 추가된 부분
+                # 'id_loss': self.weight_2 * (id_loss.detach().cpu()),  # 추가된 부분
                 'num_positive': example['mask'][task_id].float().sum()
             })
+            self.iter += 1
+            # print("iter_num", iter_num)
             rets.append(ret)
-        
+
+
         """convert batch-key to key-batch
         """
         rets_merged = defaultdict(list)
         for ret in rets:
             for k, v in ret.items():
                 rets_merged[k].append(v)
-
         return rets_merged
 
     @torch.no_grad()
@@ -364,6 +458,11 @@ class CenterHead(nn.Module):
             batch_reg = preds_dict['reg']
             batch_hei = preds_dict['height']
 
+            # 클래스 정보 추출
+            # =====================================================================
+            # batch_cls = torch.argmax(preds_dict['hm'], dim=-1, keepdim=True)
+            # =====================================================================
+
             if double_flip:
                 batch_hm = batch_hm.mean(dim=1)
                 batch_hei = batch_hei.mean(dim=1)
@@ -406,6 +505,12 @@ class CenterHead(nn.Module):
             batch_dim = batch_dim.reshape(batch, H*W, 3)
             batch_hm = batch_hm.reshape(batch, H*W, num_cls)
 
+            # 클래스 정보 reshape
+            # =======================================================================
+            # batch_cls = batch_cls.reshape(batch, H * W, 1)
+            # print(batch_cls)
+            # =======================================================================
+
             ys, xs = torch.meshgrid([torch.arange(0, H), torch.arange(0, W)])
             ys = ys.view(1, H, W).repeat(batch, 1, 1).to(batch_hm)
             xs = xs.view(1, H, W).repeat(batch, 1, 1).to(batch_hm)
@@ -426,7 +531,7 @@ class CenterHead(nn.Module):
                     batch_vel[:, 2, ..., 0] *= -1
 
                     batch_vel[:, 3] *= -1
-                    
+
                     batch_vel = batch_vel.mean(dim=1)
 
                 batch_vel = batch_vel.reshape(batch, H*W, 2)
